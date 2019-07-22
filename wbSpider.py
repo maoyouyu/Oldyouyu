@@ -3,6 +3,7 @@
 # Author : Dong-Qing
 # Time : 2019/7/16
 
+import datetime
 import requests
 import rsa
 import time
@@ -44,7 +45,6 @@ class WeiBo():
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36'
         }
         self.session.verify = False  # 取消证书验证
-
 
         self.base_https = "https:"
         self.base_url = "https://weibo.com"
@@ -115,46 +115,52 @@ class WeiBo():
 
 
     ''' 爬取微博正文 '''
-    def wbContent(self, html_url, name, page):
-
+    def wbContent(self, html_url, name, page ,b):
+        html_url = html_url
+        self.MONGO_TABLE = name
         name = name
         page = page
+        b = b
+        if b == False:
+            return
+        else:
 
-        html = self.session.get(html_url).text
-        soup = BeautifulSoup(html, 'lxml')
-        scripts = soup.find_all('script')
-        print("正在解析html")
-
-
-        weibo_title = {} # 创建保存数据
-
-        ''' 解析提取html '''
-        for script in scripts:
-            s = re.findall(r'\<div(.*)', script.text)
-            # '''解析script'''
-            if s:
-                content_html = '<html><div'+s[0][0:-2].replace("\\", "")+'</html>'
-                content_soup = BeautifulSoup(content_html, 'lxml')
-
-                side_contents = content_soup.find_all("div",class_="WB_cardwrap S_bg2")
-                if side_contents:
-                    # 解析左边栏目
-                    for side in side_contents:
-                        weibo_title = self.side_content(side, weibo_title)
+            html = self.session.get(html_url).text
+            soup = BeautifulSoup(html, 'lxml')
+            scripts = soup.find_all('script')
+            print("正在解析html")
 
 
-                contents = content_soup.find_all("div",attrs={"action-type": "feed_list_item"})
-                # 判断是否有微博内容
-                if contents:
-                    pagebar = 0
+            weibo_title = {} # 创建保存数据
 
-                    self.content(content_soup, pagebar, name, page, weibo_title)
+            ''' 解析提取html '''
+            for script in scripts:
+                s = re.findall(r'\<div(.*)', script.text)
+                # '''解析script'''
+                if s:
+                    content_html = '<html><div'+s[0][0:-2].replace("\\", "")+'</html>'
+                    content_soup = BeautifulSoup(content_html, 'lxml')
+
+                    side_contents = content_soup.find_all("div",class_="WB_cardwrap S_bg2")
+                    if side_contents:
+                        # 解析左边栏目
+                        for side in side_contents:
+                            weibo_title = self.side_content(side, weibo_title)
 
 
-    def side_content(self, side_contents, weibo_title):
+                    contents = content_soup.find_all("div",attrs={"action-type": "feed_list_item"})
+                    # 判断是否有微博内容
+                    if contents:
+                        pagebar = 0
+
+                        self.content(content_soup, pagebar, name, page, weibo_title)
+
+
+
+    def side_content(self, side, weibo_title):
         '''解析微博关注，粉丝，微博总数'''
 
-        soup = side_contents
+        soup = side
         weibo_title = weibo_title
 
         # 关注数，粉丝数，微博总数
@@ -232,15 +238,17 @@ class WeiBo():
 
 
 
-    def content(self, soup, pagebar, name, page, weibo_title):
+
+    def content(self, soup, pagebar, name, page, weibo_titles):
         '''解析微博，以及判断是否有下一页，未加载页面'''
         soup = soup
         pagebar = pagebar
         name = name
         page = page
-        weibo_title = weibo_title
+        weibo_titles = weibo_titles
 
         content = soup.find_all("div", attrs={"action-type": "feed_list_item"})
+        print(content)
 
         WB_tbinfo = content[0]["tbinfo"]
         # num = re.findall(r'ouid=(.*)',WB_tbinfo)[0].split("&")[0]
@@ -250,42 +258,46 @@ class WeiBo():
         print("正在提取每条微博")
         if content:
             for item in content:
-                self.weibo_item(item, weibo_title)
+                self.weibo_item(item, weibo_titles)
+
 
         # 检测是否有下一页
         if pagebar == 2:
-            try:
-                list_page = soup.find('a', text="下一页")
-                list_url = self.base_url+ "/" + list_page["href"]
-                print(list_url)
-                page = page + 1  # 下一页加 1
-                pagebar = 0
-                # print(pagebar)
-                print("{name}正在抓取第{num}页，请稍后".format(name=name,num=page))
-                time.sleep(1)  # 每解析一页，休息1秒，防止被封。
-                # 请求下一页
-                self.wbContent(list_url, name, page)
+            # try:
+            list_page = soup.find('a', text="下一页")
+            list_url = self.base_url+ "/" + list_page["href"]
+            print(list_url)
+            page = page + 1  # 下一页加 1
+            pagebar = 0
+            # print(pagebar)
+            print("{name}正在抓取第{num}页，请稍后".format(name=name,num=page))
+            time.sleep(1)  # 每解析一页，休息1秒，防止被封。
+            # 请求下一页
+            print(list_url)
+            b=True
+            self.wbContent(list_url, name, page,b)
 
-            except:
-                pagebar = 0
-                print("{name}微博已经全部抓取完毕！共{num}页，或爬虫出现问题，请检查".format(name=name,num = page))
+            # except:
+            #     pagebar = 0
+            #     print("{name}微博已经全部抓取完毕！共{num}页，或爬虫出现问题，请检查".format(name=name,num = page))
 
         ''' 检测加载内容 '''
-        load_weibo = soup.find('div',class_='WB_cardwrap S_bg2')
+        load_weibos = soup.find('div',class_='WB_cardwrap S_bg2')
 
-        if load_weibo:
+        if load_weibos:
             load_url = self.base_url + "/p/aj/v6/mblog/mbloglist?"
-            print("{name}正在抓取未加载{num}，请稍后".format(name=name, num=pagebar))
+            print("{name}正在抓取--第{page}页--未加载{num}，请稍后".format(name=name,page=page, num=pagebar))
             time.sleep(1)
-            self.load_weibo(load_url, mid, pagebar, name, page, weibo_title)
+            self.load_weibo(load_url, mid, pagebar, name, page, weibo_titles)
 
-    def load_weibo(self, load_url, mid, pagebar, name, page, weibo_title):
+
+    def load_weibo(self, load_url, mid, pagebar, name, page, weibo_titles):
         load_url = load_url
         mid = mid
         pagebar = pagebar
         name = name
         page = page
-        weibo_title = weibo_title
+        weibo_titles = weibo_titles
 
         '''加载页面'''
         par = {
@@ -311,30 +323,45 @@ class WeiBo():
 
         soup = BeautifulSoup(load_json,"lxml")  # 解析成bs4格式
         pagebar = pagebar + 1
-        self.content(soup, pagebar, name, page, weibo_title)
+        self.content(soup, pagebar, name, page, weibo_titles)
 
-    def weibo_item(self,item,weibo_title):
+
+    def weibo_item(self,item,weibo_titles):
         '''解析具体微博 '''
         # print("正在解析微博")
+        zhuanzai_item = item.has_attr("minfo")
 
-        zhuanzai_item = item.find_all(attrs={'minfo':True})
-        weibo_title = weibo_title
-        weibo = {}
+        # zhuanzai_item = item.find_all(attrs={'minfo':True})
+        weibo_titles = weibo_titles
+        weibos = {}
 
-        # 判断转载还是原创
-        if zhuanzai_item:
-            weibo_type = "转载"
+        WB_detail = item.find_all('div',class_='WB_detail')[0]  # 整条微博soup
+        WB_time_div = WB_detail.find('div',class_='WB_from S_txt2') # 微博时间soup
+
+        # 解析微博id，用作微博唯一标识
+        WB_id = WB_time_div.find_all('a')[0]['name']  # 微博id
+
+        # 解析微博时间
+        WB_time = WB_time_div.find_all('a')[0]['title']  # 微博时间
+
+        # 在这之前应当还判断一下是否是置顶微博，判断时间是否已经是一周之前
+        judge = self.judgeTime(WB_time)
+        if judge:
+            print(WB_time)
+            WB_ignore = WB_detail.find_all("a", class_="ignore")
+            # try:
+            if WB_ignore:
+                print("这是置顶微博")
+            # except:
+
+            print(datetime.datetime.now())
+
+
         else:
-            weibo_type = "原创"
-            WB_detail = item.find_all('div',class_='WB_detail')[0]  # 整条微博soup
-            WB_time_div = WB_detail.find('div',class_='WB_from S_txt2') # 微博时间soup
-
-            # 解析微博id，用作微博唯一标识
-            WB_id = WB_time_div.find_all('a')[0]['name']  # 微博id
 
             # 判断数据库中是否存在
-            condition = {"WB_id": WB_id}
-            find_WB = db[MONGO_TABLE].find_one(condition)
+            condition = {"微博id": WB_id}
+            find_WB = db[self.MONGO_TABLE].find_one(condition)
             if find_WB:
 
                 WB_bottom = item.find('div', class_='WB_feed_handle')  # 微博点赞，转发，评论
@@ -347,33 +374,78 @@ class WeiBo():
                 like_num = bottmo_li[3].find('span', class_='pos').find_all('em')[1].text
 
                 # 对比转发数有没有增加
-                if forward_num != find_WB["forward_num"]:
+                if forward_num != find_WB["转发数量"]:
                     find_WB["转发数量"] = forward_num  # 转发数量
-                    db[MONGO_TABLE].update(condition, find_WB)
+                    db[self.MONGO_TABLE].update(condition, find_WB)
                     print("更新转发数量，id编号为{value}".format(value=WB_id))
 
                 else:
                     print("转发数量无更新，id编号为{value}".format(value=WB_id))
 
                 # 对比评论数有没有增加
-                if comment_num != find_WB["comment_num"]:
+                if comment_num != find_WB["评论数量"]:
                     find_WB["评论数量"] = comment_num  # 评论数量
-                    db[MONGO_TABLE].update(condition, find_WB)
+                    db[self.MONGO_TABLE].update(condition, find_WB)
                     print("更新评论数量，id编号为{value}".format(value=WB_id))
 
                 else:
                     print("评论数量无更新，id编号为{value}".format(value=WB_id))
 
                 # 对比点赞数有没有增加
-                if like_num != find_WB["like_num"]:
+                if like_num != find_WB["点赞数量"]:
                     find_WB["点赞数量"] = like_num  # 点赞数量
-                    db[MONGO_TABLE].update(condition, find_WB)
+                    db[self.MONGO_TABLE].update(condition, find_WB)
                     print("更新点赞数量，id编号为{value}".format(value=WB_id))
 
                 else:
                     print("点赞数量无更新，id编号为{value}".format(value=WB_id))
-
             else:
+
+                # 判断转载还是原创
+                if zhuanzai_item:
+                    WB_empty = item.find("div",class_="WB_empty")
+                    print("正在解析转载微博，请稍后")
+                    weibo_type = "转载"
+                    if WB_empty:
+                        weibos["原微博是否已删除"] = "是"
+                    else:
+
+                        yuanweibo_item = item.find("div",class_="WB_expand S_bg1")  # 转载微博，
+
+                        yuanweibo_info = yuanweibo_item.find("div",class_="WB_info")
+                        yuan_text = yuanweibo_item.find("div",class_="WB_text")  # 原微博正文
+
+                        yuan_author = yuanweibo_info.find_all("a")[0]["nick-name"]  # 原作者
+
+                        yuanweibo_handle = yuanweibo_item.find("div",class_="WB_func clearfix")  # 原微博下面
+
+                        yuan_clearfix = yuanweibo_handle.find("div",class_="WB_handle W_fr")  # 点赞，转发，评论
+                        yuan_li = yuan_clearfix.find_all("li")
+
+                        yuan_time_a = yuanweibo_handle.find("div",class_="WB_from S_txt2").find("a")
+
+                        yuan_time = yuan_time_a["title"]  # 原微博发表时间
+                        yuan_url = self.base_url + yuan_time_a["href"]  # 原微博发表链接
+
+                        all_content_link = yuan_text.find('a', attrs={'action-type':"fl_unfold"})
+                        if all_content_link:
+                            # all_content_url = self.base_https + all_content_link["href"]  # 展开全文链接
+                            yuanweibo_text = self.parse_all_content(yuan_url)
+                        else:
+                            yuanweibo_text = yuan_text.text
+
+
+
+                        weibos["原作者"] = yuan_author
+                        weibos["原微博转发数"] = yuan_li[0].find_all('em')[1].text
+                        weibos["原微博评论数"] = yuan_li[1].find_all('em')[1].text
+                        weibos["原微博点赞数"] = yuan_li[2].find_all('em')[1].text
+                        weibos["原微博发表时间"] = yuan_time
+                        weibos["原微博链接"] = yuan_url
+                        weibos["原微博正文"] = yuanweibo_text.replace(" ", "").replace(r'(\\n|\r\n|\n|\r)', "")
+
+                else:
+                    weibo_type = "原创"
 
                 # 如果不存在解析微博，并保存
                 WB_text = WB_detail.find('div',class_='WB_text W_f14')  # 微博文字soup
@@ -383,25 +455,26 @@ class WeiBo():
                 # 微博url
                 WB_url = self.base_url + WB_time_div.find_all('a')[0]['href']  # 微博url
 
-                # 解析微博时间
-                WB_time = WB_time_div.find_all('a')[0]['title'] # 微博时间
-
                 # 来自
                 if len(WB_time_div.find_all('a')) > 1:
                     weibo_come = WB_time_div.find_all('a')[1].text
-                    weibo["来自"] = weibo_come  # 来自
+                    weibos["来自"] = weibo_come  # 来自
 
-                # 判断是否是视频
-                WB_video = WB_media.has_attr('video')
-                img_ulr = []
-                WB_video_url = ''
-                if WB_video:
-                    WB_video_url = self.base_https + WB_video[0]["src"]  # 视频链接
-                else:
+                # 判断是否是有媒体
+                if WB_media:
+                    WB_video = WB_media.find_all('video')
+                    img_ulr = []
+                    WB_video_url = ''
+                    if WB_video:
+                        WB_video_url = self.base_https + WB_video[0]["src"]  # 视频链接
+                    else:
 
-                    WB_img_li = WB_media.find_all('li')
-                    for li in WB_img_li:
-                        img_ulr.append(self.base_https + li.find('img')["src"])  # 图片链接
+                        WB_img_li = WB_media.find_all('li')
+                        for li in WB_img_li:
+                            img_ulr.append(self.base_https + li.find('img')["src"])  # 图片链接
+
+                    weibos["视频url"] = WB_video_url  # 视频链接
+                    weibos["图片ulr"] = img_ulr  # 图片链接
 
                 # ''' 点赞，转发，评论数量 '''
                 bottmo_li = WB_bottom.find_all('li')
@@ -420,64 +493,62 @@ class WeiBo():
                     content_text = WB_text.text
 
 
-                weibo["关注数"] = weibo_title["关注数"]
-                weibo["粉丝数"] = weibo_title["粉丝数"]
-                weibo["微博总数"] = weibo_title["微博总数"]
-                weibo["认证类型"] = weibo_title["认证类型"]
-                if weibo_title["认证信息"]:
-                    weibo["认证信息"] = weibo_title["认证信息"]
+                weibos["关注数"] = weibo_titles["关注数"]
+                weibos["粉丝数"] = weibo_titles["粉丝数"]
+                weibos["微博总数"] = weibo_titles["微博总数"]
+                weibos["认证类型"] = weibo_titles["认证类型"]
+                if weibo_titles["认证信息"]:
+                    weibos["认证信息"] = weibo_titles["认证信息"]
                 else:
-                    weibo["认证信息"] = ""
+                    weibos["认证信息"] = ""
 
                 try:
-                    weibo["作者地域"] = weibo_title["作者地域"]
+                    weibos["作者地域"] = weibo_titles["作者地域"]
                 except:
-                    weibo["作者地域"] = ""
+                    weibos["作者地域"] = ""
 
                 try:
-                    weibo["毕业院校"] = weibo_title["毕业院校"]
+                    weibos["毕业院校"] = weibo_titles["毕业院校"]
                 except:
-                    weibo["毕业院校"] = ""
+                    weibos["毕业院校"] = ""
 
                 try:
-                    weibo["生日"] = weibo_title["生日"]
+                    weibos["生日"] = weibo_titles["生日"]
                 except:
-                    weibo["生日"] = ""
+                    weibos["生日"] = ""
 
                 try:
-                    weibo["行业类别"] = weibo_title["行业类别"]
+                    weibos["行业类别"] = weibo_titles["行业类别"]
                 except:
-                    weibo["行业类别"] = ""
+                    weibos["行业类别"] = ""
 
                 try:
-                    weibo["公司"] = weibo_title["公司"]
+                    weibos["公司"] = weibo_titles["公司"]
                 except:
-                    weibo["公司"] = ""
+                    weibos["公司"] = ""
 
                 try:
-                    weibo["简介"] = weibo_title["简介"]
+                    weibos["简介"] = weibo_titles["简介"]
                 except:
-                    weibo["简介"] = ""
+                    weibos["简介"] = ""
 
                 try:
-                    weibo["友情链接"] = weibo_title["友情链接"]
+                    weibos["友情链接"] = weibo_titles["友情链接"]
                 except:
-                    weibo["友情链接"] = ""
+                    weibos["友情链接"] = ""
 
-                weibo["微博id"] = WB_id  # 微博id
-                weibo["微博url"] = WB_url  # 微博url
-                weibo["时间"] = WB_time  # 时间
-                weibo["类型"] = weibo_type  # 微博类型
-                weibo["正文"] = content_text.replace(" ", "").replace(r'(\\n|\r\n|\n|\r)', "")  # 正文
-                weibo["视频url"] = WB_video_url  # 视频链接
-                weibo["图片ulr"] = img_ulr  # 图片链接
-                weibo["转发数量"] = forward_num  # 转发数量
-                weibo["评论数量"] = comment_num  # 评论数量
-                weibo["点赞数量"] = like_num  # 点赞数量
+                weibos["微博id"] = WB_id  # 微博id
+                weibos["微博url"] = WB_url  # 微博url
+                weibos["时间"] = WB_time  # 时间
+                weibos["类型"] = weibo_type  # 微博类型
+                weibos["正文"] = content_text.replace(" ", "").replace(r'(\\n|\r\n|\n|\r)', "")  # 正文
+                weibos["转发数量"] = forward_num  # 转发数量
+                weibos["评论数量"] = comment_num  # 评论数量
+                weibos["点赞数量"] = like_num  # 点赞数量
 
 
-                # TODO 微博转发, 去掉秒拍视频
-                self.save_to_Mongo(weibo, WB_id)
+                # TODO 去掉秒拍视频
+                self.save_to_Mongo(weibos, WB_id)
 
 
     # ---------------------
@@ -485,7 +556,7 @@ class WeiBo():
 
     def find_Mongo(self, condition):
 
-        if db[MONGO_TABLE].find_one(condition):
+        if db[self.MONGO_TABLE].find_one(condition):
             return True
         else:
             return False
@@ -493,16 +564,30 @@ class WeiBo():
     # 存入数据库
     def save_to_Mongo(self, result, WB_id):
 
-        # try:
-        #     if db[MONGO_TABLE].insert_one(result):
-        #         print('存储微博{WB_id}到MongoDB成功'.format(WB_id=WB_id))
-        # except Exception:
-        #     print('存储到MongoDb失败')
-        db[MONGO_TABLE].insert_one(result)
+        try:
+            if db[self.MONGO_TABLE].insert_one(result):
+                print('存储微博{WB_id}到MongoDB成功'.format(WB_id=WB_id))
+        except Exception:
+            print('存储到MongoDb失败')
+        # db[self.MONGO_TABLE].insert_one(result)
 
         print('存储微博{WB_id}到MongoDB成功'.format(WB_id=WB_id))
 
     # ---------------------
+
+    def judgeTime(self, weibotime):
+
+        d1 = datetime.datetime.strptime(weibotime, '%Y-%m-%d %H:%M')
+
+        d2 = datetime.datetime.now()
+
+        delta = (d2 - d1).days
+
+        if delta == 7:
+            return True
+        else:
+            return False
+
 
     def parse_all_content(self, all_content_url):
         ''' 有展开全文的情况，获取全文 '''
@@ -535,13 +620,27 @@ class WeiBo():
         name = 'renminwang'
         html_url = 'https://weibo.com/' + name + "?profile_ftype=1&is_all=1"
         page = 1  # 下一页计数
-        self.wbContent(html_url, name, page)
+        b = True
+        for name in names:
+            self.wbContent(html_url, name, page, b)
+            print("{name}已抓取完最新一周的微博，程序将在5分钟后重新运行".format(name=name))
+            time.sleep(300)
+
+    # def end(self):
+    #     # exit()
+    #     b = False
+    #     html_url=None
+    #     name=None
+    #     page=None
+    #     self.wbContent(html_url, name, page, b)
+
 
 
 if __name__ == '__main__':
     username = '15311089821'  # 微博账号
     password = 'm123456789'  # 微博密码
     weibos = WeiBo(username, password)
+    names = ['renminwang', 'newsxh', 'rmrb', 'PKU', 'cctvxinwen']
     weibos.main()
-    # TODO 在登陆之后获取tbinfo，用框架改写，定时爬取，搜索页面爬取，热搜爬取， 账号池的搭建， 分布式的搭建， ip池的搭建（不重要）
+    # TODO 在登陆之后获取tbinfo，domain，为了稳定判断返回的页面是什么，用框架改写，搜索页面爬取，热搜爬取， 账号池的搭建， 分布式的搭建， ip池的搭建（不重要）
 
