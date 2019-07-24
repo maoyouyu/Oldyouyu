@@ -3,11 +3,14 @@
 # Author : Dong-Qing
 # Time : 2019/7/16
 
+
+import threading
 import datetime
+
 import requests
 import rsa
 import time
-import re, json
+import re, json, os
 import random
 import urllib3
 import base64
@@ -16,6 +19,7 @@ from urllib.parse import quote
 from binascii import b2a_hex
 from bs4 import BeautifulSoup
 from urllib.parse import urlencode
+from multiprocessing import Pool
 
 
 urllib3.disable_warnings()  # 取消警告
@@ -49,6 +53,9 @@ class WeiBo():
         self.base_https = "https:"
         self.base_url = "https://weibo.com"
         self.domain = 100206
+
+
+
 
     def prelogin(self):
         '''预登录，获取一些必须的参数'''
@@ -115,45 +122,42 @@ class WeiBo():
 
 
     ''' 爬取微博正文 '''
-    def wbContent(self, html_url, name, page ,b):
+    def wbContent(self, html_url, name, page ):
         html_url = html_url
         self.MONGO_TABLE = name
-        name = name
+        self.name = name
         page = page
-        b = b
-        if b == False:
-            return
-        else:
-
-            html = self.session.get(html_url).text
-            soup = BeautifulSoup(html, 'lxml')
-            scripts = soup.find_all('script')
-            print("正在解析html")
 
 
-            weibo_title = {} # 创建保存数据
-
-            ''' 解析提取html '''
-            for script in scripts:
-                s = re.findall(r'\<div(.*)', script.text)
-                # '''解析script'''
-                if s:
-                    content_html = '<html><div'+s[0][0:-2].replace("\\", "")+'</html>'
-                    content_soup = BeautifulSoup(content_html, 'lxml')
-
-                    side_contents = content_soup.find_all("div",class_="WB_cardwrap S_bg2")
-                    if side_contents:
-                        # 解析左边栏目
-                        for side in side_contents:
-                            weibo_title = self.side_content(side, weibo_title)
+        html = self.session.get(html_url).text
+        soup = BeautifulSoup(html, 'lxml')
+        scripts = soup.find_all('script')
+        print("正在解析html")
 
 
-                    contents = content_soup.find_all("div",attrs={"action-type": "feed_list_item"})
-                    # 判断是否有微博内容
-                    if contents:
-                        pagebar = 0
+        weibo_title = {} # 创建保存数据
 
-                        self.content(content_soup, pagebar, name, page, weibo_title)
+        ''' 解析提取html '''
+        for script in scripts:
+            s = re.findall(r'\<div(.*)', script.text)
+            # '''解析script'''
+            if s:
+                content_html = '<html><div'+s[0][0:-2].replace("\\", "")+'</html>'
+                content_soup = BeautifulSoup(content_html, 'lxml')
+
+                side_contents = content_soup.find_all("div",class_="WB_cardwrap S_bg2")
+                if side_contents:
+                    # 解析左边栏目
+                    for side in side_contents:
+                        weibo_title = self.side_content(side, weibo_title)
+
+
+                contents = content_soup.find_all("div",attrs={"action-type": "feed_list_item"})
+                # 判断是否有微博内容
+                if contents:
+                    pagebar = 0
+
+                    return self.content(content_soup, pagebar, page, weibo_title)
 
 
 
@@ -239,16 +243,16 @@ class WeiBo():
 
 
 
-    def content(self, soup, pagebar, name, page, weibo_titles):
+    def content(self, soup, pagebar, page, weibo_titles):
         '''解析微博，以及判断是否有下一页，未加载页面'''
         soup = soup
         pagebar = pagebar
-        name = name
+
         page = page
         weibo_titles = weibo_titles
 
         content = soup.find_all("div", attrs={"action-type": "feed_list_item"})
-        print(content)
+        # print(content)
 
         WB_tbinfo = content[0]["tbinfo"]
         # num = re.findall(r'ouid=(.*)',WB_tbinfo)[0].split("&")[0]
@@ -270,12 +274,11 @@ class WeiBo():
             page = page + 1  # 下一页加 1
             pagebar = 0
             # print(pagebar)
-            print("{name}正在抓取第{num}页，请稍后".format(name=name,num=page))
+            print("{name}正在抓取第{num}页，请稍后".format(name=self.name,num=page))
             time.sleep(1)  # 每解析一页，休息1秒，防止被封。
             # 请求下一页
             print(list_url)
-            b=True
-            self.wbContent(list_url, name, page,b)
+            return self.wbContent(list_url, self.name, page)
 
             # except:
             #     pagebar = 0
@@ -286,16 +289,15 @@ class WeiBo():
 
         if load_weibos:
             load_url = self.base_url + "/p/aj/v6/mblog/mbloglist?"
-            print("{name}正在抓取--第{page}页--未加载{num}，请稍后".format(name=name,page=page, num=pagebar))
+            print("{name}正在抓取--第{page}页--未加载{num}，请稍后".format(name=self.name,page=page, num=pagebar))
             time.sleep(1)
-            self.load_weibo(load_url, mid, pagebar, name, page, weibo_titles)
+            return self.load_weibo(load_url, mid, pagebar, page, weibo_titles)
 
 
-    def load_weibo(self, load_url, mid, pagebar, name, page, weibo_titles):
+    def load_weibo(self, load_url, mid, pagebar, page, weibo_titles):
         load_url = load_url
         mid = mid
         pagebar = pagebar
-        name = name
         page = page
         weibo_titles = weibo_titles
 
@@ -308,7 +310,7 @@ class WeiBo():
             "pagebar": pagebar,
             "pl_name": "Pl_Official_MyProfileFeed__28",
             "id": mid,
-            "script_uri": name,
+            "script_uri": self.name,
             "feed_type": 0,
             "page": page,
             "pre_page": page,
@@ -323,12 +325,12 @@ class WeiBo():
 
         soup = BeautifulSoup(load_json,"lxml")  # 解析成bs4格式
         pagebar = pagebar + 1
-        self.content(soup, pagebar, name, page, weibo_titles)
+        return self.content(soup, pagebar, page, weibo_titles)
 
 
     def weibo_item(self,item,weibo_titles):
         '''解析具体微博 '''
-        # print("正在解析微博")
+        print("正在解析具体微博")
         zhuanzai_item = item.has_attr("minfo")
 
         # zhuanzai_item = item.find_all(attrs={'minfo':True})
@@ -347,15 +349,24 @@ class WeiBo():
         # 在这之前应当还判断一下是否是置顶微博，判断时间是否已经是一周之前
         judge = self.judgeTime(WB_time)
         if judge:
+
             print(WB_time)
             WB_ignore = WB_detail.find_all("a", class_="ignore")
             # try:
             if WB_ignore:
                 print("这是置顶微博")
             # except:
+            else:
+                print("{name}已抓取完最新一周的微博，程序将在5分钟后重新运行".format(name=self.name))
+                print(datetime.datetime.now())
+                print ("============================================")
+                exitcode()
 
-            print(datetime.datetime.now())
-
+                # threading.Thread.join(self,timeout=25)
+                # time.sleep(300)
+                # quit()
+                # exit()
+                # return self.main(self.name)
 
         else:
 
@@ -548,7 +559,7 @@ class WeiBo():
 
 
                 # TODO 去掉秒拍视频
-                self.save_to_Mongo(weibos, WB_id)
+                return self.save_to_Mongo(weibos, WB_id)
 
 
     # ---------------------
@@ -571,7 +582,7 @@ class WeiBo():
             print('存储到MongoDb失败')
         # db[self.MONGO_TABLE].insert_one(result)
 
-        print('存储微博{WB_id}到MongoDB成功'.format(WB_id=WB_id))
+        print('存储微博{WB_id}到表{name}MongoDB成功'.format(name=self.name,WB_id=WB_id))
 
     # ---------------------
 
@@ -613,26 +624,36 @@ class WeiBo():
 
         return content_text
 
-    def main(self):
+    def main(self,name):
+
         self.prelogin()
         self.get_sp()
         self.login()
-        name = 'renminwang'
+
+        name = name
+        # name = 'renminwang'
         html_url = 'https://weibo.com/' + name + "?profile_ftype=1&is_all=1"
         page = 1  # 下一页计数
-        b = True
-        for name in names:
-            self.wbContent(html_url, name, page, b)
-            print("{name}已抓取完最新一周的微博，程序将在5分钟后重新运行".format(name=name))
-            time.sleep(300)
+        self.wbContent(html_url, name, page)
 
-    # def end(self):
-    #     # exit()
-    #     b = False
-    #     html_url=None
-    #     name=None
-    #     page=None
-    #     self.wbContent(html_url, name, page, b)
+
+        # t = threading.Thread(target=self.run, name='LoopThread')
+        # t.start()
+        # t.join()
+        # for name in names:
+        #     self.wbContent(html_url, name, page, b)
+        #     print("{name}已抓取完最新一周的微博，程序将在5分钟后重新运行".format(name=name))
+        #     time.sleep(300)
+    #
+    # def run(self):
+    #     name = 'renminwang'
+    #     html_url = 'https://weibo.com/' + name + "?profile_ftype=1&is_all=1"
+    #     page = 1  # 下一页计数
+    #     b = True
+    #     for name in names:
+    #         self.wbContent(html_url, name, page, b)
+
+
 
 
 
@@ -640,7 +661,16 @@ if __name__ == '__main__':
     username = '15311089821'  # 微博账号
     password = 'm123456789'  # 微博密码
     weibos = WeiBo(username, password)
-    names = ['renminwang', 'newsxh', 'rmrb', 'PKU', 'cctvxinwen']
-    weibos.main()
-    # TODO 在登陆之后获取tbinfo，domain，为了稳定判断返回的页面是什么，用框架改写，搜索页面爬取，热搜爬取， 账号池的搭建， 分布式的搭建， ip池的搭建（不重要）
+    names = ['renminwang', 'newsxh', 'rmrb', 'cctvxinwen']
+    while True:
+        print('父进程 %s.' % os.getpid())
+        p = Pool(4)
+        for name in names:
+            p.apply_async(weibos.main, args=(name,))
+        print('等待所有子进程完结...')
+        p.close()
+        p.join()
+        print('所有任务已经完结.5分钟后重启')
+        sleep(300)
+        # TODO 在登陆之后获取tbinfo，domain，为了稳定判断返回的页面是什么，携程的改写，用框架改写，搜索页面爬取，热搜爬取， 账号池的搭建， 分布式的搭建， ip池的搭建（不重要）
 
